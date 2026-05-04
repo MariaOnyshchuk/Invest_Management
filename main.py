@@ -165,7 +165,7 @@ class PortfolioDashboard(ctk.CTk):
         watchlist_risk_row = ctk.CTkFrame(right, fg_color="transparent")
         watchlist_risk_row.pack(fill="x", pady=(0, 10))
 
-        self._sidebar = SidebarPanel(watchlist_risk_row)
+        self._sidebar = SidebarPanel(watchlist_risk_row, self._prices)
         self._sidebar.pack(side="left", fill="both", expand=True, padx=(0, 8))
 
         self._risk = RiskPanel(watchlist_risk_row, self._prices)
@@ -189,6 +189,7 @@ class PortfolioDashboard(ctk.CTk):
 
         self._positions.rebuild(self._portfolio, self._prices)
         self._metrics.refresh(self._prices)
+        self._sidebar.update_sector_concentration(self._prices)
 
     # ── Live fetch ────────────────────────────────────────────────────────────
 
@@ -223,6 +224,7 @@ class PortfolioDashboard(ctk.CTk):
         self._metrics.refresh(self._prices)
         self._header.set_status(True)
         self._sidebar.update_watchlist(watchlist)
+        self._sidebar.update_sector_concentration(self._prices)
 
     # ── Manual refresh ────────────────────────────────────────────────────────
 

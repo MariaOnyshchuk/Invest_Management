@@ -86,13 +86,19 @@ class ChartPanel(ctk.CTkFrame):
     def _legend_entry(self, parent, color: str, label: str, dashed: bool):
         f = ctk.CTkFrame(parent, fg_color="transparent")
         f.pack(side="left", padx=8)
-        line = ctk.CTkFrame(
-            f, fg_color=color if not dashed else "transparent",
-            width=18, height=2, corner_radius=1,
-        )
-        line.pack(side="left", padx=(0, 5))
+
+        if dashed:
+            # малюємо пунктир через два відрізки
+            dash1 = ctk.CTkFrame(f, fg_color=color, width=7, height=2, corner_radius=1)
+            dash1.pack(side="left", padx=(0, 2))
+            dash2 = ctk.CTkFrame(f, fg_color=color, width=7, height=2, corner_radius=1)
+            dash2.pack(side="left", padx=(0, 5))
+        else:
+            line = ctk.CTkFrame(f, fg_color=color, width=18, height=2, corner_radius=1)
+            line.pack(side="left", padx=(0, 5))
+
         ctk.CTkLabel(
-            f, text=label, text_color=C["text_3"], font=F["tiny"],
+            f, text=label, text_color=C["text_2"], font=F["tiny"],
         ).pack(side="left")
 
     # ── Range switch ──────────────────────────────────────────────────────────

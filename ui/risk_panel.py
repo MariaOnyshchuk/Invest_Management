@@ -1,14 +1,15 @@
 """
 ui/risk_panel.py
 Блок ризик-метрик: Beta, Volatility, Sharpe, Max Drawdown
-та секторна концентрація.
+та коротка agent-аналітика.
 """
 
 import customtkinter as ctk
 from ui.theme import C, F
-from ui.widgets import SectionPanel
+from ui.widgets import Badge, SectionPanel
 from data.stub_data import RISK
 from utils.calc import sector_weights
+from data.agent import generate_risk_metrics_analysis
 
 
 class RiskPanel(SectionPanel):
@@ -39,38 +40,56 @@ class RiskPanel(SectionPanel):
             ctk.CTkLabel(card, text=value, text_color=color,
                           font=("SF Mono", 14, "bold")).pack(anchor="w", padx=10, pady=(0, 8))
 
-        # Sector concentration
+        # Agent analytics
         sep = ctk.CTkFrame(self, fg_color=C["border"], height=1)
         sep.pack(fill="x", padx=14, pady=(4, 0))
 
+        analysis = generate_risk_metrics_analysis(RISK, sector_weights(prices))
+        severity = str(analysis["severity"])
+        sev_style = {
+            "low": (C["green"], C["green_bg"], "Low risk"),
+            "medium": (C["amber"], C["amber_bg"], "Moderate"),
+            "high": (C["red"], C["red_bg"], "Elevated"),
+        }.get(severity, (C["text_2"], C["bg_card"], "Risk"))
+
+        head = ctk.CTkFrame(self, fg_color="transparent")
+        head.pack(fill="x", padx=16, pady=(8, 2))
+
         ctk.CTkLabel(
-            self, text="Концентрація секторів",
+            head, text="Agent аналітика risk metrics",
             text_color=C["text_3"], font=F["tiny"],
-        ).pack(anchor="w", padx=16, pady=(6, 4))
+        ).pack(side="left")
 
-        sectors = sector_weights(prices)
-        for name, pct in sorted(sectors.items(), key=lambda x: -x[1]):
-            row_f = ctk.CTkFrame(self, fg_color="transparent")
-            row_f.pack(fill="x", padx=16, pady=2)
+        Badge(head, text=sev_style[2], fg=sev_style[0], bg=sev_style[1]).pack(side="right")
 
+        card = ctk.CTkFrame(self, fg_color=C["bg_card"], corner_radius=8)
+        card.pack(fill="x", padx=14, pady=(6, 12))
+
+        ctk.CTkLabel(
+            card,
+            text=str(analysis["title"]),
+            text_color=C["text_1"],
+            font=("SF Pro Text", 13, "bold"),
+            anchor="w",
+        ).pack(anchor="w", padx=10, pady=(8, 2))
+
+        ctk.CTkLabel(
+            card,
+            text=str(analysis["summary"]),
+            text_color=C["text_2"],
+            font=F["small"],
+            anchor="w",
+            justify="left",
+            wraplength=260,
+        ).pack(fill="x", padx=10, pady=(0, 6))
+
+        for bullet in analysis["bullets"]:
             ctk.CTkLabel(
-                row_f, text=name, text_color=C["text_2"],
-                font=F["tiny"], width=64, anchor="w",
-            ).pack(side="left")
-
-            bar_bg = ctk.CTkFrame(row_f, fg_color=C["bg_card"],
-                                   height=5, corner_radius=3)
-            bar_bg.pack(side="left", fill="x", expand=True, padx=6)
-
-            # Inner fill (approximate via nested frame)
-            bar_fill = ctk.CTkFrame(
-                bar_bg, fg_color=C["accent"],
-                height=5, corner_radius=3,
-                width=int(pct * 1.2),   # scale to rough px
-            )
-            bar_fill.place(x=0, y=0, relheight=1)
-
-            ctk.CTkLabel(
-                row_f, text=f"{pct:.0f}%", text_color=C["text_3"],
-                font=F["tiny"], width=32, anchor="e",
-            ).pack(side="left")
+                card,
+                text=f"• {bullet}",
+                text_color=C["text_3"],
+                font=F["tiny"],
+                anchor="w",
+                justify="left",
+                wraplength=260,
+            ).pack(fill="x", padx=10, pady=(0, 6))

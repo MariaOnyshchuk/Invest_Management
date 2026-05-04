@@ -7,12 +7,15 @@ import customtkinter as ctk
 from ui.theme import C, F
 from ui.widgets import SectionPanel
 from data.stub_data import WATCHLIST, CALENDAR
+from utils.calc import sector_weights
 
 
 class SidebarPanel(SectionPanel):
-    def __init__(self, master, **kwargs):
+    def __init__(self, master, prices: dict[str, float], **kwargs):
         super().__init__(master, title="Watchlist  ·  Calendar", **kwargs)
         self._watch_col = None
+        self._sector_col = None
+        self._prices = prices
         self._build()
 
     def _build(self):
@@ -33,6 +36,15 @@ class SidebarPanel(SectionPanel):
         cal_col = ctk.CTkFrame(outer, fg_color="transparent")
         cal_col.pack(side="left", fill="both", expand=True, padx=(16, 0))
         self._build_calendar(cal_col)
+
+        # Sector concentration moved here from Risk Metrics
+        ctk.CTkFrame(self, fg_color=C["border"], height=1).pack(
+            fill="x", padx=16, pady=(0, 8)
+        )
+
+        self._sector_col = ctk.CTkFrame(self, fg_color="transparent")
+        self._sector_col.pack(fill="x", padx=16, pady=(0, 12))
+        self._build_sector_concentration(self._sector_col, self._prices)
 
     # ── Watchlist ─────────────────────────────────────────────────────────────
 
@@ -126,3 +138,50 @@ class SidebarPanel(SectionPanel):
                 info, text=ev.date,
                 text_color=C["text_3"], font=("SF Pro Text", 11), anchor="w",
             ).pack(anchor="w")
+
+    # ── Sector concentration ──────────────────────────────────────────────────
+
+    def _build_sector_concentration(self, parent, prices: dict[str, float]):
+        ctk.CTkLabel(
+            parent, text="КОНЦЕНТРАЦІЯ СЕКТОРІВ",
+            text_color=C["text_3"], font=F["tiny"],
+        ).pack(anchor="w", pady=(0, 6))
+
+        sectors = sector_weights(prices)
+        for name, pct in sorted(sectors.items(), key=lambda x: -x[1]):
+            row_f = ctk.CTkFrame(parent, fg_color="transparent")
+            row_f.pack(fill="x", pady=2)
+
+            ctk.CTkLabel(
+                row_f, text=name, text_color=C["text_2"],
+                font=F["tiny"], width=64, anchor="w",
+            ).pack(side="left")
+
+            bar_bg = ctk.CTkFrame(
+                row_f,
+                fg_color=C["bg_card"],
+                height=5,
+                corner_radius=3,
+            )
+            bar_bg.pack(side="left", fill="x", expand=True, padx=6)
+
+            bar_fill = ctk.CTkFrame(
+                bar_bg,
+                fg_color=C["accent"],
+                height=5,
+                corner_radius=3,
+            )
+            bar_fill.place(x=0, y=0, relheight=1, relwidth=min(pct / 100, 1))
+
+            ctk.CTkLabel(
+                row_f, text=f"{pct:.0f}%", text_color=C["text_3"],
+                font=F["tiny"], width=32, anchor="e",
+            ).pack(side="left")
+
+    def update_sector_concentration(self, prices: dict[str, float]):
+        self._prices = prices
+        if not self._sector_col:
+            return
+        for widget in self._sector_col.winfo_children():
+            widget.destroy()
+        self._build_sector_concentration(self._sector_col, prices)

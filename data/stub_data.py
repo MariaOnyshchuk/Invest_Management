@@ -28,8 +28,8 @@ class NewsItem:
     rec_label: str
     text: str
     # нові поля:
-    metrics: dict = field(default_factory=dict)   # {weighted_sentiment, avg_risk, momentum, raw_score}
-    sources: list = field(default_factory=list)   # [{"title": ..., "link": ..., "source": ...}]
+    metrics: dict = field(default_factory=dict)
+    sources: list = field(default_factory=list)
     article_count: int = 0
 
 @dataclass
