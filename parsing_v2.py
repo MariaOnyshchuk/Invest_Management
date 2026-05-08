@@ -9,19 +9,17 @@ import trafilatura
 
 # Перелік RSS‑стрічок для збору новин
 FEED_URLS: List[str] = [
-    # РБК‑Україна економіка – містить повні тексти
+    # РБК‑Україна економіка
     "https://www.rbc.ua/static/rss/ukrnet.economic.ukr.rss.xml",
-    # Економічна правда – у стрічці довгі описи статей
+    # Економічна правда
     "https://epravda.com.ua/rss/",
-    # BBC Business – заголовки та посилання
+    # BBC Business
     "https://feeds.bbci.co.uk/news/business/rss.xml",
-    # CNBC Economy – перелік статей із посиланнями
+    # CNBC Economy
     "https://www.cnbc.com/id/20910258/device/rss/rss.html",
-    # CNN Business/Economy – приклад; доступність залежить від сервера
+    # CNN Business/Economy
     "https://rss.cnn.com/rss/edition_business.rss",
 ]
-
-# Скільки днів у минуле збирати новини
 DEFAULT_LOOKBACK_DAYS = 7
 
 def fetch_url(url: str, timeout: float = 10.0) -> Optional[str]:
@@ -58,14 +56,12 @@ def parse_feed(feed_url: str, days: int) -> List[Dict[str, Optional[str]]]:
             if published < cutoff:
                 continue
         text: Optional[str] = None
-        # якщо у стрічці є елемент content або summary – пробуємо використати його
         if "content" in entry:
             c = entry.content[0] if entry.content else None
             if c and isinstance(c, dict):
                 text = c.get("value")
         elif getattr(entry, "summary", None) and len(entry.summary) > 500:
             text = entry.summary
-        # якщо текст короткий, завантажуємо сторінку
         if not text or len(text) < 500:
             full_text = extract_full_text(entry.link)
             if full_text:
