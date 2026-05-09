@@ -39,6 +39,8 @@ class RiskPanel(SectionPanel):
             risk = RISK
             used_fallback = True
 
+        sector_pct = sector_weights(self._prices, self._portfolio)
+
         # 2. Grid Metrics (Beta, Vol, etc.)
         body = ctk.CTkFrame(self, fg_color="transparent")
         body.pack(fill="x", padx=14, pady=(8, 4))
@@ -60,13 +62,13 @@ class RiskPanel(SectionPanel):
             ctk.CTkLabel(card, text=value, text_color=color, font=("SF Mono", 14, "bold")).pack(anchor="w", padx=10, pady=(0, 8))
 
         # 3. Sector Concentration (The New Part)
-        self._build_sector_section()
+        self._build_sector_section(sector_pct)
 
         # 4. Agent analytics
         sep = ctk.CTkFrame(self, fg_color=C["border"], height=1)
         sep.pack(fill="x", padx=14, pady=(12, 0))
 
-        analysis = generate_risk_metrics_analysis(risk, sector_weights(self._prices, self._portfolio))
+        analysis = generate_risk_metrics_analysis(risk, sector_pct)
         severity = str(analysis["severity"])
         sev_style = {
             "low": (C["green"], C["green_bg"], "Low risk"),
@@ -89,14 +91,13 @@ class RiskPanel(SectionPanel):
         for bullet in analysis["bullets"]:
             ctk.CTkLabel(ai_card, text=f"• {bullet}", text_color=C["text_3"], font=F["tiny"], anchor="w", justify="left", wraplength=260).pack(fill="x", padx=10, pady=(0, 4))
 
-    def _build_sector_section(self):
+    def _build_sector_section(self, sectors: dict[str, float]):
         """Internal helper to render the sector bars."""
         container = ctk.CTkFrame(self, fg_color="transparent")
         container.pack(fill="x", padx=16, pady=(12, 4))
 
         ctk.CTkLabel(container, text="КОНЦЕНТРАЦІЯ СЕКТОРІВ", text_color=C["text_3"], font=F["tiny"]).pack(anchor="w", pady=(0, 6))
 
-        sectors = sector_weights(self._prices, self._portfolio)
         # Sort by weight descending
         for name, pct in sorted(sectors.items(), key=lambda x: -x[1]):
             row = ctk.CTkFrame(container, fg_color="transparent")

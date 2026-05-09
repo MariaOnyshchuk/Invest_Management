@@ -214,9 +214,17 @@ def fetch_portfolio_risk_metrics(portfolio: list[Stock]) -> RiskMetrics:
     variance = float(bench_ret.var())
     beta = float(port_ret.cov(bench_ret) / variance) if variance else 1.0
     volatility = float(port_ret.std() * (TRADING_DAYS ** 0.5) * 100)
-    annual_return = float((combined["portfolio"].iloc[-1] / combined["portfolio"].iloc[0] - 1) * 100)
-    risk_free = fetch_capm_assumptions()["risk_free_rate"]
-    sharpe = (annual_return - risk_free) / volatility if volatility else 0.0
+    trailing_annual_return = float(
+        (combined["portfolio"].iloc[-1] / combined["portfolio"].iloc[0] - 1) * 100
+    )
+    # Sharpe: узгоджені одиниці на щоденних дохідностях (decimal), rf_annual у % → денний простий rf
+    risk_free_pct = fetch_capm_assumptions()["risk_free_rate"]
+    rf_daily = (risk_free_pct / 100.0) / TRADING_DAYS
+    port_std = float(port_ret.std())
+    if port_std > 1e-12:
+        sharpe = float((port_ret.mean() - rf_daily) / port_std * (TRADING_DAYS ** 0.5))
+    else:
+        sharpe = 0.0
     running_max = combined["portfolio"].cummax()
     drawdown = (combined["portfolio"] / running_max - 1) * 100
     max_drawdown = float(drawdown.min())
@@ -226,7 +234,18 @@ def fetch_portfolio_risk_metrics(portfolio: list[Stock]) -> RiskMetrics:
         volatility=round(volatility, 1),
         sharpe=round(sharpe, 2),
         max_drawdown=round(max_drawdown, 1),
+        trailing_annual_return=round(trailing_annual_return, 2),
     )
+
+
+@lru_cache(maxsize=256)
+def fetch_ticker_sector(ticker: str) -> str:
+    """Сектор з Yahoo Finance для концентрації; порожній рядок якщо недоступно."""
+    info = fetch_ticker_info(ticker.strip().upper())
+    if not info:
+        return ""
+    sec = info.get("sector")
+    return str(sec).strip() if sec else ""
 
 
 @lru_cache(maxsize=256)

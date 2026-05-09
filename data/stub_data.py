@@ -50,6 +50,7 @@ class RiskMetrics:
     volatility: float   # %
     sharpe: float
     max_drawdown: float  # %, від'ємне
+    trailing_annual_return: float = 0.0  # проста 1Y дохідність портфеля, % (для CAPM/alpha)
 
 # ── Дані ─────────────────────────────────────────────────────────────────────
 
@@ -114,4 +115,5 @@ RISK: RiskMetrics = RiskMetrics(
     volatility=18.4,
     sharpe=1.87,
     max_drawdown=-14.2,
+    trailing_annual_return=11.3,
 )

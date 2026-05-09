@@ -8,7 +8,9 @@ from datetime import datetime, timedelta
 from data.stub_data import PORTFOLIO, Stock
 from data.market_data import (
     fetch_capm_assumptions,
+    fetch_portfolio_risk_metrics,
     fetch_ticker_fundamentals,
+    fetch_ticker_sector,
 )
 
 
@@ -44,7 +46,8 @@ def sector_weights(prices: dict[str, float], portfolio: list[Stock] | None = Non
         return {}
     weights: dict[str, float] = {}
     for s in stocks:
-        weights[s.sector] = weights.get(s.sector, 0) + s.qty * prices.get(s.ticker, s.price)
+        label = fetch_ticker_sector(s.ticker) or s.sector
+        weights[label] = weights.get(label, 0) + s.qty * prices.get(s.ticker, s.price)
     return {k: v / total * 100 for k, v in weights.items()}
 
 
@@ -109,14 +112,20 @@ def portfolio_capm_summary(
         }
     portfolio_beta = sum(row["beta"] * row["allocation"] / 100 for row in rows)
     expected_return = capm_expected_return(portfolio_beta)
-    actual_return = sum(row["return"] * row["allocation"] / 100 for row in rows)
+    # Alpha порівнюємо з 1Y trailing return портфеля (той самий горизонт, що й Rm у CAPM),
+    # а не зі зваженим P&L від середньої ціни входу.
+    try:
+        actual_return = float(fetch_portfolio_risk_metrics(portfolio).trailing_annual_return)
+    except Exception:
+        actual_return = sum(row["return"] * row["allocation"] / 100 for row in rows)
+    assumptions = fetch_capm_assumptions()
     return {
         "beta": portfolio_beta,
         "capm": expected_return,
         "return": actual_return,
         "alpha": actual_return - expected_return,
-        "risk_free_rate": fetch_capm_assumptions()["risk_free_rate"],
-        "market_premium": fetch_capm_assumptions()["market_premium"],
+        "risk_free_rate": assumptions["risk_free_rate"],
+        "market_premium": assumptions["market_premium"],
     }
 
 
