@@ -11,6 +11,107 @@ import customtkinter as ctk
 from ui.theme import C, F
 
 
+FORMULA_INFO = {
+    "beta": {
+        "title": "Beta",
+        "definition": (
+            "Beta показує, наскільки актив або портфель чутливий до руху ринку. "
+            "β = 1 означає рух приблизно як ринок, β > 1 означає вищу амплітуду."
+        ),
+        "formula": "βp = Σ wi × βi",
+        "tip": "У портфелі beta рахується як зважена beta позицій за їхніми частками.",
+    },
+    "capm": {
+        "title": "CAPM",
+        "definition": (
+            "CAPM оцінює очікувану дохідність, яку інвестор має вимагати за ринковий ризик."
+        ),
+        "formula": "E[r] = rf + β × (Rm - rf)",
+        "tip": "У цій панелі CAPM є річним required return, тому alpha коректна лише як орієнтовний сигнал.",
+    },
+    "alpha": {
+        "title": "Alpha",
+        "definition": (
+            "Alpha показує надлишкову дохідність відносно того, що було б справедливо за CAPM."
+        ),
+        "formula": "α = r actual - E[r] CAPM",
+        "tip": "Позитивна alpha підтримує позицію, але для точної оцінки потрібна дата входу і порівнянний горизонт.",
+    },
+    "npv": {
+        "title": "Target Gap",
+        "definition": (
+            "Target gap показує різницю між analyst target price і поточною ринковою ціною."
+        ),
+        "formula": "Gap = Analyst target - Current price",
+        "tip": "Додатний gap означає потенційний upside, відʼємний gap — ризик переоцінки. Це не DDM-модель.",
+    },
+    "target": {
+        "title": "Analyst Target",
+        "definition": (
+            "Analyst target береться з фундаментальних даних Yahoo Finance, якщо він доступний."
+        ),
+        "formula": "Fair value = targetMeanPrice або targetMedianPrice",
+        "tip": "Якщо target недоступний, модель повертає поточну ціну і показує нейтральний gap.",
+    },
+}
+
+
+def show_formula_modal(master, key: str):
+    data = FORMULA_INFO.get(key)
+    if not data:
+        return
+
+    win = ctk.CTkToplevel(master)
+    win.title(str(data["title"]))
+    win.geometry("460x320")
+    win.configure(fg_color=C["bg_panel"])
+    win.grab_set()
+
+    ctk.CTkLabel(
+        win,
+        text=str(data["title"]),
+        text_color=C["text_1"],
+        font=("SF Pro Display", 18, "bold"),
+    ).pack(anchor="w", padx=24, pady=(22, 6))
+
+    ctk.CTkLabel(
+        win,
+        text=str(data["definition"]),
+        text_color=C["text_2"],
+        font=F["body"],
+        justify="left",
+        wraplength=400,
+    ).pack(anchor="w", padx=24, pady=(0, 14))
+
+    formula_box = ctk.CTkFrame(win, fg_color=C["bg_card"], corner_radius=8)
+    formula_box.pack(fill="x", padx=24, pady=(0, 14))
+    ctk.CTkLabel(
+        formula_box,
+        text=str(data["formula"]),
+        text_color=C["accent"],
+        font=("SF Mono", 15, "bold"),
+    ).pack(anchor="w", padx=14, pady=12)
+
+    ctk.CTkLabel(
+        win,
+        text=str(data["tip"]),
+        text_color=C["text_3"],
+        font=F["small"],
+        justify="left",
+        wraplength=400,
+    ).pack(anchor="w", padx=24, pady=(0, 16))
+
+    ctk.CTkButton(
+        win,
+        text="Close",
+        width=110,
+        height=32,
+        fg_color=C["accent"],
+        hover_color=C["accent_dim"],
+        command=win.destroy,
+    ).pack(anchor="e", padx=24)
+
+
 class Badge(ctk.CTkFrame):
     """Маленький кольоровий ярлик з текстом."""
 

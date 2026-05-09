@@ -12,7 +12,7 @@ from data.agent import generate_recommendations
 
 
 class BottomBar(ctk.CTkFrame):
-    def __init__(self, master, on_refresh, **kwargs):
+    def __init__(self, master, on_refresh, get_portfolio=None, get_prices=None, **kwargs):
         super().__init__(
             master,
             fg_color=C["bg_panel"],
@@ -24,6 +24,8 @@ class BottomBar(ctk.CTkFrame):
         )
         self.pack_propagate(False)
         self._on_refresh  = on_refresh
+        self._get_portfolio = get_portfolio
+        self._get_prices = get_prices
         self._refreshing  = False
         self._build()
 
@@ -100,7 +102,13 @@ class BottomBar(ctk.CTkFrame):
 
     def _run_agent(self):
         """Runs in background thread. Passes on_progress callback to agent."""
-        news = generate_recommendations(on_progress=self._on_progress)
+        portfolio = self._get_portfolio() if self._get_portfolio else None
+        prices = self._get_prices() if self._get_prices else None
+        news = generate_recommendations(
+            on_progress=self._on_progress,
+            portfolio=portfolio,
+            prices=prices,
+        )
         self.after(0, lambda: self._finish_refresh(news))
 
     def _on_progress(self, current: int, total: int, status: str = ""):

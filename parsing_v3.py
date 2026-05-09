@@ -1,12 +1,21 @@
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import datetime as dt
 from email.utils import parsedate_to_datetime
 import json
+import os
+import re
 from typing import List, Dict, Optional, Any
 
 import feedparser
 import requests
 import trafilatura
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
 
 FEED_URLS: List[str] = [
     # РБК‑Україна економіка
@@ -21,12 +30,15 @@ FEED_URLS: List[str] = [
     "https://rss.cnn.com/rss/edition_business.rss",
 ]
 
-BENZINGA_API_KEY = "bz.BFBTBNHNALGQFMEQ7RMJXOZTWFNX5IGG"
-POLYGON_API_KEY = "xNk8ZB1U_tXZILOv4SRNQwOmQ93rbdD1"
+BENZINGA_API_KEY = os.getenv("BENZINGA_API_KEY", "")
+POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "")
 BENZINGA_API_URL = "https://api.benzinga.com/api/v2/news"
 POLYGON_NEWS_API_URL = "https://api.polygon.io/v2/reference/news"
 
 DEFAULT_LOOKBACK_DAYS = 7
+MAX_FEED_WORKERS = 5
+MAX_API_WORKERS = 6
+FULL_TEXT_LIMIT_PER_FEED = 4
 
 
 def utc_now() -> dt.datetime:
@@ -88,7 +100,40 @@ def extract_full_text(url: str) -> Optional[str]:
     except Exception:
         return None
 
-def parse_feed(feed_url: str, days: int) -> List[Dict[str, Optional[str]]]:
+
+def matches_keywords(*parts: Optional[str], keywords: Optional[list[str]] = None) -> bool:
+    if not keywords:
+        return True
+    haystack = " ".join(str(part or "") for part in parts).lower()
+    for keyword in keywords:
+        normalized = str(keyword or "").strip().lower()
+        if not normalized:
+            continue
+        if len(normalized) <= 3 and normalized.isalnum():
+            if re.search(rf"(?<![a-z0-9]){re.escape(normalized)}(?![a-z0-9])", haystack):
+                return True
+        elif normalized in haystack:
+            return True
+    return False
+
+
+def dedupe_stories(stories: list[dict]) -> list[dict]:
+    seen: set[str] = set()
+    unique: list[dict] = []
+    for story in stories:
+        key = (story.get("link") or story.get("title") or "").strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique.append(story)
+    return unique
+
+
+def parse_feed(
+    feed_url: str,
+    days: int,
+    keywords: Optional[list[str]] = None,
+) -> List[Dict[str, Optional[str]]]:
     stories: List[Dict[str, Optional[str]]] = []
     feed_data = fetch_url(feed_url)
     if not feed_data:
@@ -96,6 +141,7 @@ def parse_feed(feed_url: str, days: int) -> List[Dict[str, Optional[str]]]:
 
     feed = feedparser.parse(feed_data)
 
+    full_text_fetches = 0
     for entry in feed.entries:
         published = None
         if hasattr(entry, "published_parsed") and entry.published_parsed:
@@ -106,22 +152,29 @@ def parse_feed(feed_url: str, days: int) -> List[Dict[str, Optional[str]]]:
         if not is_recent(published, days):
             continue
 
+        summary = getattr(entry, "summary", None)
+        title = entry.get("title", "").strip()
+        link = entry.get("link", "")
+
+        if not matches_keywords(title, summary, link, keywords=keywords):
+            continue
+
         text: Optional[str] = None
         if "content" in entry:
             c = entry.content[0] if entry.content else None
             if c and isinstance(c, dict):
                 text = c.get("value")
-        elif getattr(entry, "summary", None) and len(entry.summary) > 500:
-            text = entry.summary
+        elif summary and len(summary) > 500:
+            text = summary
 
-        link = entry.get("link", "")
-        if (not text or len(text) < 500) and link:
+        if (not text or len(text) < 500) and link and full_text_fetches < FULL_TEXT_LIMIT_PER_FEED:
+            full_text_fetches += 1
             full_text = extract_full_text(link)
             if full_text:
                 text = full_text
 
         stories.append({
-            "title": entry.get("title", "").strip(),
+            "title": title,
             "link": link,
             "published": published.isoformat() if published else None,
             "text": text,
@@ -131,11 +184,24 @@ def parse_feed(feed_url: str, days: int) -> List[Dict[str, Optional[str]]]:
     return stories
 
 
-def collect_all_feeds(feed_urls: List[str], days: int) -> List[Dict[str, Optional[str]]]:
+def collect_all_feeds(
+    feed_urls: List[str],
+    days: int,
+    keywords: Optional[list[str]] = None,
+) -> List[Dict[str, Optional[str]]]:
     all_stories: List[Dict[str, Optional[str]]] = []
-    for url in feed_urls:
-        all_stories.extend(parse_feed(url, days))
-    return all_stories
+    workers = min(MAX_FEED_WORKERS, max(1, len(feed_urls)))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [
+            executor.submit(parse_feed, url, days, keywords)
+            for url in feed_urls
+        ]
+        for future in as_completed(futures):
+            try:
+                all_stories.extend(future.result())
+            except Exception as exc:
+                print(f"RSS помилка: {exc}")
+    return dedupe_stories(all_stories)
 
 def request_json(
     url: str,
@@ -152,10 +218,18 @@ def request_json(
         return None
 
 
-def parse_benzinga_api(days: int) -> List[Dict[str, Optional[str]]]:
+def parse_benzinga_api(
+    days: int,
+    tickers: Optional[list[str]] = None,
+) -> List[Dict[str, Optional[str]]]:
+    if not BENZINGA_API_KEY:
+        return []
+
     params = {
         "token": BENZINGA_API_KEY,
     }
+    if tickers:
+        params["tickers"] = ",".join(tickers)
     data = request_json(BENZINGA_API_URL, params=params)
     if not data:
         return []
@@ -235,21 +309,99 @@ def parse_polygon_api(days: int) -> List[Dict[str, Optional[str]]]:
     return stories
 
 
-def collect_api_sources(days: int) -> List[Dict[str, Optional[str]]]:
+def parse_polygon_api_for_tickers(days: int, tickers: list[str]) -> List[Dict[str, Optional[str]]]:
+    if not POLYGON_API_KEY or not tickers:
+        return []
+
+    stories: List[Dict[str, Optional[str]]] = []
+    start = (utc_now() - dt.timedelta(days=days)).date().isoformat()
+
+    def _fetch_for_ticker(ticker: str) -> List[Dict[str, Optional[str]]]:
+        params = {
+            "apiKey": POLYGON_API_KEY,
+            "ticker": ticker,
+            "published_utc.gte": start,
+            "order": "desc",
+            "sort": "published_utc",
+            "limit": 25,
+        }
+        data = request_json(POLYGON_NEWS_API_URL, params=params)
+        if not data:
+            return []
+
+        items = data.get("results", []) if isinstance(data, dict) else []
+        ticker_stories: List[Dict[str, Optional[str]]] = []
+        for item in items:
+            published = parse_any_date(item.get("published_utc"))
+            if not is_recent(published, days):
+                continue
+
+            link = item.get("article_url") or item.get("amp_url") or ""
+            text = item.get("description")
+
+            insights = item.get("insights") or []
+            if insights:
+                insight_lines = []
+                for insight in insights[:5]:
+                    i_ticker = insight.get("ticker")
+                    sentiment = insight.get("sentiment")
+                    reason = insight.get("sentiment_reasoning")
+                    insight_lines.append(f"{i_ticker}: {sentiment}. {reason}")
+                text = (text or "") + "\n\nPolygon insights:\n" + "\n".join(insight_lines)
+
+            ticker_stories.append({
+                "title": item.get("title", ""),
+                "link": link,
+                "published": published.isoformat() if published else None,
+                "text": text,
+                "source": f"polygon_io:{ticker}",
+            })
+        return ticker_stories
+
+    workers = min(MAX_API_WORKERS, max(1, len(tickers)))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [executor.submit(_fetch_for_ticker, ticker) for ticker in tickers]
+        for future in as_completed(futures):
+            try:
+                stories.extend(future.result())
+            except Exception as exc:
+                print(f"Polygon ticker API помилка: {exc}")
+
+    return dedupe_stories(stories)
+
+
+def collect_api_sources(
+    days: int,
+    tickers: Optional[list[str]] = None,
+) -> List[Dict[str, Optional[str]]]:
     all_stories: List[Dict[str, Optional[str]]] = []
 
-    all_stories.extend(parse_benzinga_api(days))
+    all_stories.extend(parse_benzinga_api(days, tickers=tickers))
 
-    all_stories.extend(parse_polygon_api(days))
+    if tickers:
+        all_stories.extend(parse_polygon_api_for_tickers(days, tickers))
+    else:
+        all_stories.extend(parse_polygon_api(days))
 
-    return all_stories
+    return dedupe_stories(all_stories)
 
 
-def collect_all_sources(feed_urls: List[str], days: int) -> List[Dict[str, Optional[str]]]:
+def collect_all_sources(
+    feed_urls: List[str],
+    days: int,
+    keywords: Optional[list[str]] = None,
+    tickers: Optional[list[str]] = None,
+) -> List[Dict[str, Optional[str]]]:
     all_news: List[Dict[str, Optional[str]]] = []
-    all_news.extend(collect_all_feeds(feed_urls, days))
-    all_news.extend(collect_api_sources(days))
-    return all_news
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        feed_future = executor.submit(collect_all_feeds, feed_urls, days, keywords)
+        api_future = executor.submit(collect_api_sources, days, tickers)
+        for future in as_completed([feed_future, api_future]):
+            try:
+                all_news.extend(future.result())
+            except Exception as exc:
+                print(f"News source помилка: {exc}")
+    return dedupe_stories(all_news)
 
 
 if __name__ == "__main__":

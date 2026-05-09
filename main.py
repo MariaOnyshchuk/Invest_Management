@@ -20,6 +20,7 @@ from ui.theme import C
 from ui.header import Header, MetricsBar
 from ui.chart_panel import ChartPanel
 from ui.positions_panel import PositionsPanel
+from ui.valuation_panel import ValuationPanel
 from ui.risk_panel import RiskPanel
 from ui.news_panel import NewsFeedPanel
 from ui.sidebar_panel import SidebarPanel
@@ -28,77 +29,16 @@ from data.stub_data import PORTFOLIO, Stock
 
 
 LIVE_REFRESH_MS = 60_000
-LEFT_COL_W      = 500   # фіксована ширина лівої колонки
-
-
-class ScrollableBody(ctk.CTkFrame):
-    """
-    Фрейм із вертикальним скролом через стандартний tk.Canvas.
-    Дочірні елементи додаються до self.inner — звичайний CTkFrame
-    з повною шириною canvas.
-    Скрол: колесо миші + scrollbar праворуч.
-    """
-
+LEFT_COL_W      = 560   # фіксована ширина лівої колонки
+class ScrollableBody(ctk.CTkScrollableFrame):
     def __init__(self, master, **kwargs):
-        super().__init__(master, fg_color="transparent", **kwargs)
-
-        # Canvas — прозорий фон
-        self._canvas = tk.Canvas(
-            self,
-            bg=C["bg_main"],
-            highlightthickness=0,
-            bd=0,
+        super().__init__(
+            master,
+            fg_color="transparent",
+            scrollbar_button_color=C["bg_input"],
+            scrollbar_button_hover_color=C["border"],
+            **kwargs
         )
-
-        # Scrollbar
-        self._sb = ctk.CTkScrollbar(
-            self,
-            orientation="vertical",
-            command=self._canvas.yview,
-            fg_color=C["bg_main"],
-            button_color=C["bg_input"],
-            button_hover_color=C["border"],
-            width=8,
-        )
-        self._canvas.configure(yscrollcommand=self._sb.set)
-
-        self._sb.pack(side="right", fill="y")
-        self._canvas.pack(side="left", fill="both", expand=True)
-
-        # Внутрішній фрейм для контенту
-        self.inner = ctk.CTkFrame(self._canvas, fg_color="transparent")
-        self._win_id = self._canvas.create_window(
-            (0, 0), window=self.inner, anchor="nw",
-        )
-
-        # Оновлюємо scroll-регіон при зміні розміру inner
-        self.inner.bind("<Configure>", self._on_inner_configure)
-        # Оновлюємо ширину inner при зміні розміру canvas
-        self._canvas.bind("<Configure>", self._on_canvas_configure)
-
-        # Скрол колесом миші — прив'язуємо до canvas і до всіх дочірніх
-        self._canvas.bind_all("<MouseWheel>",     self._on_mousewheel)   # Windows/macOS
-        self._canvas.bind_all("<Button-4>",        self._on_scroll_up)    # Linux
-        self._canvas.bind_all("<Button-5>",        self._on_scroll_down)  # Linux
-
-    def _on_inner_configure(self, _event):
-        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
-
-    def _on_canvas_configure(self, event):
-        # inner завжди займає повну ширину canvas
-        self._canvas.itemconfig(self._win_id, width=event.width)
-
-    def _on_mousewheel(self, event):
-        # macOS delta кратний 1, Windows — 120
-        delta = -1 if event.delta > 0 else 1
-        self._canvas.yview_scroll(delta, "units")
-
-    def _on_scroll_up(self, _event):
-        self._canvas.yview_scroll(-1, "units")
-
-    def _on_scroll_down(self, _event):
-        self._canvas.yview_scroll(1, "units")
-
 
 class PortfolioDashboard(ctk.CTk):
     def __init__(self):
@@ -124,37 +64,47 @@ class PortfolioDashboard(ctk.CTk):
         self._header.pack(fill="x", side="top")
 
         # Bottom bar — завжди знизу, не скролиться
-        self._bottom = BottomBar(self, on_refresh=self._on_manual_refresh)
+        self._bottom = BottomBar(
+            self,
+            on_refresh=self._on_manual_refresh,
+            get_portfolio=lambda: list(self._portfolio),
+            get_prices=lambda: dict(self._prices),
+        )
         self._bottom.pack(fill="x", side="bottom", padx=18, pady=(0, 4))
 
-        # Scrollable body — між хедером і bottom bar
+        # Scrollable body
         self._scroll_body = ScrollableBody(self)
         self._scroll_body.pack(fill="both", expand=True)
 
-        inner = self._scroll_body.inner
+        inner = self._scroll_body
 
         # Metrics bar
-        self._metrics = MetricsBar(inner, self._prices)
+        self._metrics = MetricsBar(inner, self._prices, self._portfolio)
         self._metrics.pack(fill="x", padx=18, pady=(12, 0))
 
-        # Двоколонковий layout
+        # Columns
         columns = ctk.CTkFrame(inner, fg_color="transparent")
         columns.pack(fill="x", padx=18, pady=12)
 
         left = ctk.CTkFrame(columns, fg_color="transparent", width=LEFT_COL_W)
         left.pack(side="left", fill="both", padx=(0, 10))
-        left.pack_propagate(False)
 
         right = ctk.CTkFrame(columns, fg_color="transparent")
         right.pack(side="left", fill="both", expand=True)
 
-        # Ліва колонка
-        self._chart = ChartPanel(left, height=380)
+        # # Ліва колонка
+        self._chart = ChartPanel(left, portfolio=self._portfolio, height=380)
         self._chart.pack(fill="x", pady=(0, 10))
-        # self._chart.pack_propagate(False)
 
-        self._positions = PositionsPanel(left, portfolio=self._portfolio)
+        self._positions = PositionsPanel(
+            left,
+            portfolio=self._portfolio,
+            on_remove=self._on_stock_removed,
+        )
         self._positions.pack(fill="x", pady=(0, 10))
+
+        self._valuation = ValuationPanel(left, portfolio=self._portfolio, prices=self._prices)
+        self._valuation.pack(fill="x", pady=(0, 10))
 
         # Права колонка
         # self._sidebar = SidebarPanel(right)
@@ -165,10 +115,10 @@ class PortfolioDashboard(ctk.CTk):
         watchlist_risk_row = ctk.CTkFrame(right, fg_color="transparent")
         watchlist_risk_row.pack(fill="x", pady=(0, 10))
 
-        self._sidebar = SidebarPanel(watchlist_risk_row, self._prices)
+        self._sidebar = SidebarPanel(watchlist_risk_row, self._prices, self._portfolio)
         self._sidebar.pack(side="left", fill="both", expand=True, padx=(0, 8))
 
-        self._risk = RiskPanel(watchlist_risk_row, self._prices)
+        self._risk = RiskPanel(watchlist_risk_row, self._prices, self._portfolio)
         self._risk.pack(side="left", fill="both", expand=True)
 
         self._news_panel = NewsFeedPanel(right)
@@ -188,8 +138,22 @@ class PortfolioDashboard(ctk.CTk):
             self._prices[stock.ticker] = stock.price
 
         self._positions.rebuild(self._portfolio, self._prices)
-        self._metrics.refresh(self._prices)
-        self._sidebar.update_sector_concentration(self._prices)
+        self._valuation.rebuild(self._portfolio, self._prices)
+        self._chart.update_portfolio(self._portfolio)
+        self._metrics.refresh(self._prices, self._portfolio)
+        self._risk.rebuild(self._prices, self._portfolio)
+        self._sidebar.update_sector_concentration(self._prices, self._portfolio)
+
+    def _on_stock_removed(self, ticker: str):
+        self._portfolio = [s for s in self._portfolio if s.ticker != ticker]
+        self._prices.pop(ticker, None)
+
+        self._positions.rebuild(self._portfolio, self._prices)
+        self._valuation.rebuild(self._portfolio, self._prices)
+        self._chart.update_portfolio(self._portfolio)
+        self._metrics.refresh(self._prices, self._portfolio)
+        self._risk.rebuild(self._prices, self._portfolio)
+        self._sidebar.update_sector_concentration(self._prices, self._portfolio)
 
     # ── Live fetch ────────────────────────────────────────────────────────────
 
@@ -204,15 +168,27 @@ class PortfolioDashboard(ctk.CTk):
 
     def _live_worker(self):
         try:
-            from data.market_data import fetch_live_prices, fetch_watchlist_prices
-            live     = fetch_live_prices()
-            watchlist = fetch_watchlist_prices()
-            if live:
-                self.after(0, lambda: self._apply_live(live, watchlist))
+            from data.market_data import (
+                fetch_live_prices_with_status,
+                fetch_watchlist_prices_with_status,
+            )
+            live, live_fallback = fetch_live_prices_with_status(self._portfolio)
+            watchlist, watch_fallback = fetch_watchlist_prices_with_status()
+            if live or watchlist:
+                self.after(
+                    0,
+                    lambda: self._apply_live(live, watchlist, live_fallback, watch_fallback),
+                )
         except Exception as e:
             print(f"[main] live fetch error: {e}")
 
-    def _apply_live(self, live: dict[str, float], watchlist: dict):
+    def _apply_live(
+        self,
+        live: dict[str, float],
+        watchlist: dict,
+        live_fallback: set[str] | None = None,
+        watch_fallback: set[str] | None = None,
+    ):
         old = dict(self._prices)
         for ticker, price in live.items():
             if ticker in self._prices:
@@ -221,10 +197,15 @@ class PortfolioDashboard(ctk.CTk):
                     if s.ticker == ticker:
                         s.price = price
         self._positions.update_prices(self._prices, old)
-        self._metrics.refresh(self._prices)
-        self._header.set_status(True)
+        self._valuation.update_prices(self._prices)
+        self._metrics.refresh(self._prices, self._portfolio)
+        fallback_count = len(live_fallback or set()) + len(watch_fallback or set())
+        if fallback_count:
+            self._header.set_status(True, f"Partial fallback ({fallback_count})")
+        else:
+            self._header.set_status(True)
         self._sidebar.update_watchlist(watchlist)
-        self._sidebar.update_sector_concentration(self._prices)
+        self._sidebar.update_sector_concentration(self._prices, self._portfolio)
 
     # ── Manual refresh ────────────────────────────────────────────────────────
 

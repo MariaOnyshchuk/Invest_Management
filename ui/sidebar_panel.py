@@ -6,16 +6,20 @@ Supports live price updates via update_watchlist().
 import customtkinter as ctk
 from ui.theme import C, F
 from ui.widgets import SectionPanel
-from data.stub_data import WATCHLIST, CALENDAR
+from data.stub_data import WATCHLIST, CALENDAR, Stock
+from data.market_data import fetch_portfolio_calendar
 from utils.calc import sector_weights
 
 
 class SidebarPanel(SectionPanel):
-    def __init__(self, master, prices: dict[str, float], **kwargs):
+    def __init__(self, master, prices: dict[str, float], portfolio: list[Stock], **kwargs):
         super().__init__(master, title="Watchlist  ·  Calendar", **kwargs)
         self._watch_col = None
+        self._cal_col = None
         self._sector_col = None
         self._prices = prices
+        self._portfolio = portfolio
+        self._calendar_key = tuple(s.ticker for s in portfolio)
         self._build()
 
     def _build(self):
@@ -33,9 +37,9 @@ class SidebarPanel(SectionPanel):
         )
 
         # Calendar column
-        cal_col = ctk.CTkFrame(outer, fg_color="transparent")
-        cal_col.pack(side="left", fill="both", expand=True, padx=(16, 0))
-        self._build_calendar(cal_col)
+        self._cal_col = ctk.CTkFrame(outer, fg_color="transparent")
+        self._cal_col.pack(side="left", fill="both", expand=True, padx=(16, 0))
+        self._build_calendar(self._cal_col)
 
         # Sector concentration moved here from Risk Metrics
         ctk.CTkFrame(self, fg_color=C["border"], height=1).pack(
@@ -112,7 +116,13 @@ class SidebarPanel(SectionPanel):
             text_color=C["text_3"], font=F["tiny"],
         ).pack(anchor="w", pady=(0, 8))
 
-        for ev in CALENDAR:
+        try:
+            events = fetch_portfolio_calendar(self._portfolio) or CALENDAR
+        except Exception as e:
+            print(f"[sidebar_panel] calendar fallback: {e}")
+            events = CALENDAR
+
+        for ev in events:
             row = ctk.CTkFrame(parent, fg_color=C["bg_card"], corner_radius=8)
             row.pack(fill="x", pady=3)
 
@@ -147,7 +157,7 @@ class SidebarPanel(SectionPanel):
             text_color=C["text_3"], font=F["tiny"],
         ).pack(anchor="w", pady=(0, 6))
 
-        sectors = sector_weights(prices)
+        sectors = sector_weights(prices, self._portfolio)
         for name, pct in sorted(sectors.items(), key=lambda x: -x[1]):
             row_f = ctk.CTkFrame(parent, fg_color="transparent")
             row_f.pack(fill="x", pady=2)
@@ -178,10 +188,23 @@ class SidebarPanel(SectionPanel):
                 font=F["tiny"], width=32, anchor="e",
             ).pack(side="left")
 
-    def update_sector_concentration(self, prices: dict[str, float]):
+    def update_sector_concentration(self, prices: dict[str, float], portfolio: list[Stock] | None = None):
         self._prices = prices
+        if portfolio is not None:
+            new_key = tuple(s.ticker for s in portfolio)
+            self._portfolio = portfolio
+            if new_key != self._calendar_key:
+                self._calendar_key = new_key
+                self.update_calendar()
         if not self._sector_col:
             return
         for widget in self._sector_col.winfo_children():
             widget.destroy()
         self._build_sector_concentration(self._sector_col, prices)
+
+    def update_calendar(self):
+        if not self._cal_col:
+            return
+        for widget in self._cal_col.winfo_children():
+            widget.destroy()
+        self._build_calendar(self._cal_col)

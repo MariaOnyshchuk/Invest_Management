@@ -12,13 +12,16 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.ticker as mticker
 
 from ui.theme import C, F
+from data.stub_data import Stock
+from data.market_data import fetch_portfolio_chart_data
 from utils.calc import generate_chart_data
 
 RANGES = ["1D", "1W", "1M", "3M", "1Y"]
+MIN_Y_PADDING = 10
 
 
 class ChartPanel(ctk.CTkFrame):
-    def __init__(self, master, **kwargs):
+    def __init__(self, master, portfolio: list[Stock], **kwargs):
         super().__init__(
             master,
             fg_color=C["bg_panel"],
@@ -27,6 +30,7 @@ class ChartPanel(ctk.CTkFrame):
             border_color=C["border"],
             **kwargs,
         )
+        self._portfolio = portfolio
         self._active_range = "1D"
         self._build_header()
         self._build_chart()
@@ -117,7 +121,11 @@ class ChartPanel(ctk.CTkFrame):
 
     def refresh(self, rng: str | None = None):
         rng = rng or self._active_range
-        labels, port, bench = generate_chart_data(rng)
+        try:
+            labels, port, bench = fetch_portfolio_chart_data(self._portfolio, rng)
+        except Exception as e:
+            print(f"[chart_panel] historical chart fallback: {e}")
+            labels, port, bench = generate_chart_data(rng)
 
         ax = self._ax
         ax.clear()
@@ -141,6 +149,12 @@ class ChartPanel(ctk.CTkFrame):
         ax.plot(xs, bench, color=C["amber"], linewidth=1.2,
                 linestyle="--", dashes=(5, 3), alpha=0.75, label="S&P 500")
 
+        all_values = [*port, *bench]
+        y_min = min(all_values)
+        y_max = max(all_values)
+        y_padding = max((y_max - y_min) * 0.08, MIN_Y_PADDING)
+        ax.set_ylim(y_min - y_padding, y_max + y_padding)
+
         # X-axis labels — показуємо лише ~6
         step = max(1, len(labels) // 6)
         ax.set_xticks(xs[::step])
@@ -149,3 +163,7 @@ class ChartPanel(ctk.CTkFrame):
         ax.yaxis.set_major_formatter(mticker.FormatStrFormatter("%.0f"))
         self._fig.tight_layout(pad=0.5)
         self._mpl_canvas.draw()
+
+    def update_portfolio(self, portfolio: list[Stock]):
+        self._portfolio = portfolio
+        self.refresh()

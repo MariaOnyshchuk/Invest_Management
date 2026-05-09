@@ -9,7 +9,9 @@ from datetime import datetime
 
 from ui.theme import C, F
 from ui.widgets import MetricCard
-from utils.calc import portfolio_metrics, daily_change
+from data.stub_data import Stock
+from data.market_data import fetch_portfolio_day_change
+from utils.calc import portfolio_metrics
 
 
 class Header(ctk.CTkFrame):
@@ -85,33 +87,37 @@ class Header(ctk.CTkFrame):
         )
         self.after(1000, self._tick_clock)
 
-    def set_status(self, live: bool):
+    def set_status(self, live: bool, text: str | None = None):
         if live:
-            self._dot.configure(text_color=C["green"])
-            self._status.configure(text="Live")
+            is_partial = bool(text)
+            self._dot.configure(text_color=C["amber"] if is_partial else C["green"])
+            self._status.configure(text=text or "Live")
         else:
             self._dot.configure(text_color=C["amber"])
-            self._status.configure(text="Оновлення...")
+            self._status.configure(text=text or "Оновлення...")
 
 
 # ── Metrics bar ───────────────────────────────────────────────────────────────
 
 class MetricsBar(ctk.CTkFrame):
-    def __init__(self, master, prices: dict[str, float], **kwargs):
+    def __init__(self, master, prices: dict[str, float], portfolio: list[Stock], **kwargs):
         super().__init__(master, fg_color="transparent", **kwargs)
         self._cards: dict[str, MetricCard] = {}
+        self._portfolio = portfolio
         self._build(prices)
 
     def _build(self, prices: dict[str, float]):
-        m   = portfolio_metrics(prices)
-        day = daily_change(prices)
+        m   = portfolio_metrics(prices, self._portfolio)
+        day = self._day_change()
         day_color = C["green"] if day >= 0 else C["red"]
         day_sign  = "+" if day >= 0 else ""
+        pnl_sign = "+" if m["pnl"] >= 0 else ""
+        pnl_color = C["green"] if m["pnl"] >= 0 else C["red"]
 
         specs = [
             ("total", "Вартість портфелю", f"${m['total_value']:,.0f}", None),
-            ("pnl",   "P&L абсолютний",    f"+${m['pnl']:,.0f}",        C["green"]),
-            ("ret",   "Дохідність",         f"+{m['pnl_pct']:.1f}%",     C["green"]),
+            ("pnl",   "P&L абсолютний",    f"{pnl_sign}${m['pnl']:,.0f}", pnl_color),
+            ("ret",   "Дохідність",         f"{pnl_sign}{m['pnl_pct']:.1f}%", pnl_color),
             ("day",   "Денна зміна",        f"{day_sign}{day:.2f}%",    day_color),
         ]
 
@@ -120,13 +126,24 @@ class MetricsBar(ctk.CTkFrame):
             card.pack(side="left", fill="x", expand=True, padx=4)
             self._cards[key] = card
 
-    def refresh(self, prices: dict[str, float]):
-        m   = portfolio_metrics(prices)
-        day = daily_change(prices)
+    def _day_change(self) -> float:
+        try:
+            return fetch_portfolio_day_change(self._portfolio)
+        except Exception as e:
+            print(f"[header] day change fallback: {e}")
+            return 0.0
+
+    def refresh(self, prices: dict[str, float], portfolio: list[Stock] | None = None):
+        if portfolio is not None:
+            self._portfolio = portfolio
+        m   = portfolio_metrics(prices, self._portfolio)
+        day = self._day_change()
         day_color = C["green"] if day >= 0 else C["red"]
         day_sign  = "+" if day >= 0 else ""
+        pnl_sign = "+" if m["pnl"] >= 0 else ""
+        pnl_color = C["green"] if m["pnl"] >= 0 else C["red"]
 
         self._cards["total"].update_value(f"${m['total_value']:,.0f}")
-        self._cards["pnl"].update_value(f"+${m['pnl']:,.0f}")
-        self._cards["ret"].update_value(f"+{m['pnl_pct']:.1f}%")
+        self._cards["pnl"].update_value(f"{pnl_sign}${m['pnl']:,.0f}", pnl_color)
+        self._cards["ret"].update_value(f"{pnl_sign}{m['pnl_pct']:.1f}%", pnl_color)
         self._cards["day"].update_value(f"{day_sign}{day:.2f}%", day_color)

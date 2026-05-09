@@ -19,12 +19,111 @@ class NewsFeedPanel(SectionPanel):
     def __init__(self, master, **kwargs):
         super().__init__(master, title="AI Agent · News & Recommendations", **kwargs)
         self._active = "All"
+        self._overview = ctk.CTkFrame(self, fg_color="transparent")
+        self._overview.pack(fill="x", padx=14, pady=(10, 4))
         self._build_filters()
         self._scroll = ctk.CTkScrollableFrame(
             self, fg_color="transparent", corner_radius=0,
         )
         self._scroll.pack(fill="both", expand=True, padx=10, pady=(4, 10))
         self.render("All")
+
+    # ── Agent overview ───────────────────────────────────────────────────────
+
+    def _render_overview(self, items: list[NewsItem]):
+        for widget in self._overview.winfo_children():
+            widget.destroy()
+
+        if not items:
+            self._build_empty_overview()
+            return
+
+        scores = [self._score_value(item.score) for item in items]
+        avg_score = sum(scores) / len(scores) if scores else 0.0
+        bullish = sum(1 for item in items if item.sentiment == "positive")
+        bearish = sum(1 for item in items if item.sentiment == "negative")
+        neutral = len(items) - bullish - bearish
+
+        if avg_score >= 1.5:
+            mood, mood_color, mood_bg = "Bullish", C["green"], C["green_bg"]
+        elif avg_score <= -1.5:
+            mood, mood_color, mood_bg = "Bearish", C["red"], C["red_bg"]
+        else:
+            mood, mood_color, mood_bg = "Neutral", C["amber"], C["amber_bg"]
+
+        brief = ctk.CTkFrame(self._overview, fg_color=mood_bg, corner_radius=9)
+        brief.pack(fill="x", pady=(0, 8))
+
+        left = ctk.CTkFrame(brief, fg_color="transparent")
+        left.pack(side="left", fill="x", expand=True, padx=12, pady=10)
+
+        ctk.CTkLabel(
+            left,
+            text=f"Agent brief: {mood}",
+            text_color=mood_color,
+            font=("SF Pro Text", 14, "bold"),
+            anchor="w",
+        ).pack(anchor="w")
+
+        ctk.CTkLabel(
+            left,
+            text=f"{len(items)} ticker signals · {bullish} bullish · {neutral} neutral · {bearish} bearish",
+            text_color=C["text_2"],
+            font=("SF Pro Text", 11),
+            anchor="w",
+        ).pack(anchor="w", pady=(2, 0))
+
+        ctk.CTkLabel(
+            brief,
+            text=f"{avg_score:+.1f}",
+            text_color=mood_color,
+            font=("SF Mono", 22, "bold"),
+        ).pack(side="right", padx=14, pady=10)
+
+        scores_grid = ctk.CTkFrame(self._overview, fg_color="transparent")
+        scores_grid.pack(fill="x")
+
+        for idx, item in enumerate(sorted(items, key=lambda n: self._score_value(n.score), reverse=True)):
+            score = self._score_value(item.score)
+            color = C["green"] if score >= 1.5 else C["red"] if score <= -1.5 else C["amber"]
+            card = ctk.CTkFrame(scores_grid, fg_color=C["bg_card"], corner_radius=8)
+            card.grid(row=0, column=idx, padx=3, sticky="nsew")
+            scores_grid.grid_columnconfigure(idx, weight=1)
+
+            ctk.CTkLabel(
+                card,
+                text=item.ticker,
+                text_color=C["text_2"],
+                font=("SF Mono", 11, "bold"),
+            ).pack(pady=(8, 0))
+            ctk.CTkLabel(
+                card,
+                text=item.score,
+                text_color=color,
+                font=("SF Mono", 17, "bold"),
+            ).pack()
+            ctk.CTkLabel(
+                card,
+                text=item.rec_label,
+                text_color=color,
+                font=("SF Pro Text", 10),
+            ).pack(pady=(0, 8))
+
+    def _build_empty_overview(self):
+        box = ctk.CTkFrame(self._overview, fg_color=C["bg_card"], corner_radius=9)
+        box.pack(fill="x")
+        ctk.CTkLabel(
+            box,
+            text="Agent brief will appear after scraping and AI analysis",
+            text_color=C["text_3"],
+            font=F["small"],
+        ).pack(padx=12, pady=12)
+
+    def _score_value(self, score: str) -> float:
+        try:
+            return float(str(score).replace("+", "").replace("−", "-"))
+        except ValueError:
+            return 0.0
 
     # ── Filters ───────────────────────────────────────────────────────────────
 
@@ -59,6 +158,7 @@ class NewsFeedPanel(SectionPanel):
 
     def render(self, filter_label: str = "All"):
         self._set_active_filter(filter_label)
+        self._render_overview(_current_news)
         for w in self._scroll.winfo_children():
             w.destroy()
 
@@ -116,6 +216,9 @@ class NewsFeedPanel(SectionPanel):
         row2.pack(fill="x", pady=(0, 6))
         label, fg, bg = SENTIMENT_STYLE[item.sentiment]
         Badge(row2, label, fg, bg).pack(side="left", padx=(0, 5))
+        signal_type = (getattr(item, "metrics", {}) or {}).get("signal_type")
+        if signal_type:
+            Badge(row2, str(signal_type), C["accent"], C["bg_tag"]).pack(side="left", padx=(0, 5))
         s_fg, s_bg = IMPACT_COLOR[item.impact]
         Badge(row2, f"Score {item.score}", s_fg, s_bg).pack(side="left", padx=(0, 5))
         r_fg, r_bg = REC_COLOR[item.rec]
@@ -128,36 +231,36 @@ class NewsFeedPanel(SectionPanel):
             wraplength=420, justify="left", anchor="w",
         )
         text_lbl.pack(fill="x", anchor="w", pady=(0, 8))
-        rec_row = ctk.CTkFrame(content, fg_color=C["bg_main"], corner_radius=6)
-        rec_row.pack(fill="x", pady=(0, 6))
 
-        r_fg, r_bg = REC_COLOR[item.rec]
-        ctk.CTkLabel(
-            rec_row,
-            text=f"📌 Recommendation: {item.rec_label}",
-            text_color=r_fg, font=("SF Pro Text", 12, "bold"),
-        ).pack(anchor="w", padx=10, pady=6)
+        reason_lbl = None
+        if self._has_explanation(item):
+            reason_row = ctk.CTkFrame(content, fg_color=C["bg_main"], corner_radius=6)
+            reason_row.pack(fill="x", pady=(0, 6))
+            reason_lbl = ctk.CTkLabel(
+                reason_row,
+                text=self._impact_reason(item),
+                text_color=C["text_2"],
+                font=F["tiny"],
+                justify="left",
+                anchor="w",
+                wraplength=420,
+            )
+            reason_lbl.pack(fill="x", padx=10, pady=6)
 
-        # Row 4: metrics breakdown (if available)
+        # Row 5: compact evidence metrics, max 4 items
         m = getattr(item, "metrics", {})
-        if m:
+        if m and self._has_explanation(item):
             metrics_frame = ctk.CTkFrame(content, fg_color=C["bg_main"], corner_radius=6)
             metrics_frame.pack(fill="x", pady=(0, 6))
 
-            metrics_text = (
-                f"Sentiment signal: {m.get('weighted_sentiment', 0):+.3f}  ·  "
-                f"Avg risk: {m.get('avg_risk', 0):.3f}  ·  "
-                f"Raw score: {m.get('raw_score', 0):+.2f}  ·  "
-                f"Momentum: {m.get('momentum_pct', 0):+.1f}%  ·  "
-                f"Articles: {m.get('relevant_articles', 0)}/{m.get('total_articles', 0)}"
-            )
+            metrics_text = "  ·  ".join(self._display_metrics(m))
             ctk.CTkLabel(
                 metrics_frame, text=metrics_text,
                 text_color=C["text_3"], font=F["tiny"],
                 anchor="w",
             ).pack(anchor="w", padx=8, pady=4)
 
-        # Row 5: sources
+        # Row 6: sources
         sources = getattr(item, "sources", [])
         if sources:
             src_frame = ctk.CTkFrame(content, fg_color="transparent")
@@ -183,8 +286,68 @@ class NewsFeedPanel(SectionPanel):
                     lbl.bind("<Button-1>", lambda e, url=link: webbrowser.open(url))
 
         # update wraplength after render
-        def _update_wrap(lbl=text_lbl):
+        def _update_wrap(lbl=text_lbl, reason=reason_lbl):
             w = lbl.winfo_width()
             if w > 50:
                 lbl.configure(wraplength=max(200, w - 10))
+                if reason is not None:
+                    reason.configure(wraplength=max(200, w - 10))
         card.after(100, _update_wrap)
+
+    def _display_metrics(self, metrics: dict) -> list[str]:
+        if metrics.get("signal_type") == "Market signal":
+            items = ["Signal Market"]
+
+            momentum = metrics.get("momentum_pct")
+            if momentum is not None:
+                items.append(f"P&L {float(momentum):+.1f}%")
+
+            target_gap = metrics.get("target_gap_pct")
+            if target_gap is not None:
+                items.append(f"Target gap {float(target_gap):+.1f}%")
+
+            beta = metrics.get("beta")
+            if beta is not None:
+                items.append(f"Beta {float(beta):.2f}")
+
+            return items[:4]
+
+        items = [
+            f"Articles {metrics.get('relevant_articles', 0)}/{metrics.get('total_articles', 0)}"
+        ]
+
+        risk = metrics.get("avg_risk")
+        if risk is not None:
+            items.append(f"Risk {float(risk):.2f}")
+
+        weight = float(metrics.get("signal_weight", 0) or 0)
+        if weight > 0:
+            items.append(f"News weight {weight:.2f}")
+
+        momentum_used = float(metrics.get("momentum_used", 0) or 0)
+        if abs(momentum_used) >= 0.05:
+            items.append(f"Momentum nudge {momentum_used:+.1f}")
+
+        return items[:4]
+
+    def _has_explanation(self, item: NewsItem) -> bool:
+        metrics = getattr(item, "metrics", {}) or {}
+        return getattr(item, "article_count", 0) > 0 or bool(metrics.get("signal_type"))
+
+    def _impact_reason(self, item: NewsItem) -> str:
+        score = self._score_value(item.score)
+        metrics = getattr(item, "metrics", {}) or {}
+
+        if metrics.get("signal_type") == "Market signal":
+            mechanism = "Why: fallback market/valuation signal used because direct news was not strong enough"
+        elif item.sentiment == "positive":
+            mechanism = "Why: positive catalyst supports growth or valuation"
+        elif item.sentiment == "negative":
+            mechanism = "Why: negative catalyst raises risk or weakens valuation support"
+        else:
+            mechanism = "Why: mixed signal, limited valuation impact"
+
+        details = [mechanism]
+        details.append(f"final score {score:+.1f}")
+
+        return " · ".join(details)
