@@ -111,6 +111,7 @@ def _close_frame(tickers: list[str], period: str, interval: str):
         group_by="ticker",
         auto_adjust=True,
         threads=True,
+        # prepost=True,
     )
     if len(tickers) == 1:
         return data["Close"].dropna().to_frame(tickers[0])
@@ -130,6 +131,10 @@ def fetch_portfolio_chart_data(
     all_tickers = [*tickers, "SPY"]
 
     closes = _close_frame(all_tickers, period, interval).ffill().dropna(how="all")
+    if closes.index.tz is not None:
+        closes.index = closes.index.tz_convert("Europe/Kyiv")
+    else:
+        closes.index = closes.index.tz_localize("UTC").tz_convert("Europe/Kyiv")
     if closes.empty or "SPY" not in closes:
         raise ValueError("No historical data returned")
 

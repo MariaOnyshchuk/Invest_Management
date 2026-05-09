@@ -1,15 +1,13 @@
 """
 ui/widgets.py
-Невеликі повторно-використовувані компоненти:
-  - Badge (кольоровий ярлик)
-  - SectionPanel (панель з заголовком)
-  - MetricCard (картка з числом)
-  - Divider (горизонтальна лінія)
 """
-
+import io
 import customtkinter as ctk
+from PIL import Image as PILImage
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 from ui.theme import C, F
-
 
 FORMULA_INFO = {
     "beta": {
@@ -18,7 +16,7 @@ FORMULA_INFO = {
             "Beta показує, наскільки актив або портфель чутливий до руху ринку. "
             "β = 1 означає рух приблизно як ринок, β > 1 означає вищу амплітуду."
         ),
-        "formula": "βp = Σ wi × βi",
+        "latex": r"$\beta_p = \sum_{i} w_i \cdot \beta_i$",
         "tip": "У портфелі beta рахується як зважена beta позицій за їхніми частками.",
     },
     "capm": {
@@ -26,7 +24,7 @@ FORMULA_INFO = {
         "definition": (
             "CAPM оцінює очікувану дохідність, яку інвестор має вимагати за ринковий ризик."
         ),
-        "formula": "E[r] = rf + β × (Rm - rf)",
+        "latex": r"$E[r] = r_f + \beta \cdot (R_m - r_f)$",
         "tip": "У цій панелі CAPM є річним required return, тому alpha коректна лише як орієнтовний сигнал.",
     },
     "alpha": {
@@ -34,7 +32,7 @@ FORMULA_INFO = {
         "definition": (
             "Alpha показує надлишкову дохідність відносно того, що було б справедливо за CAPM."
         ),
-        "formula": "α = r actual - E[r] CAPM",
+        "latex": r"$\alpha = r_{\text{actual}} - E[r]_{\text{CAPM}}$",
         "tip": "Позитивна alpha підтримує позицію, але для точної оцінки потрібна дата входу і порівнянний горизонт.",
     },
     "npv": {
@@ -42,7 +40,7 @@ FORMULA_INFO = {
         "definition": (
             "Target gap показує різницю між analyst target price і поточною ринковою ціною."
         ),
-        "formula": "Gap = Analyst target - Current price",
+        "latex": r"$\text{Gap} = P_{\text{target}} - P_{\text{current}}$",
         "tip": "Додатний gap означає потенційний upside, відʼємний gap — ризик переоцінки. Це не DDM-модель.",
     },
     "target": {
@@ -50,10 +48,36 @@ FORMULA_INFO = {
         "definition": (
             "Analyst target береться з фундаментальних даних Yahoo Finance, якщо він доступний."
         ),
-        "formula": "Fair value = targetMeanPrice або targetMedianPrice",
+        "latex": r"$P_{\text{fair}} = \text{targetMeanPrice}$",
         "tip": "Якщо target недоступний, модель повертає поточну ціну і показує нейтральний gap.",
     },
 }
+
+
+def _render_latex(latex: str, accent_color: str, bg_color: str) -> ctk.CTkImage:
+    """Render a LaTeX string to a CTkImage using matplotlib."""
+    fig, ax = plt.subplots(figsize=(5, 0.7))
+    fig.patch.set_facecolor(bg_color)
+    ax.set_facecolor(bg_color)
+    ax.axis("off")
+    ax.text(
+        0.5, 0.5, latex,
+        fontsize=18,
+        color=accent_color,
+        ha="center", va="center",
+        transform=ax.transAxes,
+    )
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight",
+                facecolor=bg_color, edgecolor="none")
+    plt.close(fig)
+    buf.seek(0)
+    pil_img = PILImage.open(buf)
+    # Scale to fit modal width (~412px) while keeping crisp rendering
+    w, h = pil_img.size
+    scale = min(412 / w, 1.0)
+    display_size = (int(w * scale), int(h * scale))
+    return ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=display_size)
 
 
 def show_formula_modal(master, key: str):
@@ -63,7 +87,7 @@ def show_formula_modal(master, key: str):
 
     win = ctk.CTkToplevel(master)
     win.title(str(data["title"]))
-    win.geometry("460x320")
+    win.geometry("460x340")
     win.configure(fg_color=C["bg_panel"])
     win.grab_set()
 
@@ -83,14 +107,21 @@ def show_formula_modal(master, key: str):
         wraplength=400,
     ).pack(anchor="w", padx=24, pady=(0, 14))
 
+    # Formula box with rendered LaTeX image
     formula_box = ctk.CTkFrame(win, fg_color=C["bg_card"], corner_radius=8)
     formula_box.pack(fill="x", padx=24, pady=(0, 14))
-    ctk.CTkLabel(
-        formula_box,
-        text=str(data["formula"]),
-        text_color=C["accent"],
-        font=("SF Mono", 15, "bold"),
-    ).pack(anchor="w", padx=14, pady=12)
+
+    try:
+        img = _render_latex(data["latex"], C["accent"], C["bg_card"])
+        ctk.CTkLabel(formula_box, image=img, text="").pack(pady=14)
+    except Exception:
+        # Fallback to plain text if matplotlib fails
+        ctk.CTkLabel(
+            formula_box,
+            text=data["latex"],
+            text_color=C["accent"],
+            font=("SF Mono", 15, "bold"),
+        ).pack(anchor="w", padx=14, pady=12)
 
     ctk.CTkLabel(
         win,
@@ -110,6 +141,41 @@ def show_formula_modal(master, key: str):
         hover_color=C["accent_dim"],
         command=win.destroy,
     ).pack(anchor="e", padx=24)
+
+class MetricCard(ctk.CTkFrame):
+    """Картка з підписом і великим числом."""
+
+    def __init__(self, master, label: str, value: str, value_color: str | None = None, **kwargs):
+        super().__init__(
+            master,
+            fg_color=C["bg_card"],
+            corner_radius=10,
+            **kwargs,
+        )
+        ctk.CTkLabel(
+            self, text=label, text_color=C["text_3"],
+            font=F["tiny"], anchor="w",
+        ).pack(anchor="w", padx=12, pady=(10, 2))
+
+        self._val_label = ctk.CTkLabel(
+            self,
+            text=value,
+            text_color=value_color or C["text_1"],
+            font=F["mono_med"],
+            anchor="w",
+        )
+        self._val_label.pack(anchor="w", padx=12, pady=(0, 10))
+
+    def update_value(self, value: str, color: str | None = None):
+        self._val_label.configure(text=value)
+        if color:
+            self._val_label.configure(text_color=color)
+
+
+class Divider(ctk.CTkFrame):
+    def __init__(self, master, **kwargs):
+        super().__init__(master, fg_color=C["border"], height=1, **kwargs)
+        self.pack(fill="x", padx=16, pady=4)
 
 
 class Badge(ctk.CTkFrame):
@@ -166,39 +232,3 @@ class SectionPanel(ctk.CTkFrame):
         f = ctk.CTkFrame(self, fg_color="transparent")
         f.pack(fill="both", expand=True)
         return f
-
-
-class MetricCard(ctk.CTkFrame):
-    """Картка з підписом і великим числом."""
-
-    def __init__(self, master, label: str, value: str, value_color: str | None = None, **kwargs):
-        super().__init__(
-            master,
-            fg_color=C["bg_card"],
-            corner_radius=10,
-            **kwargs,
-        )
-        ctk.CTkLabel(
-            self, text=label, text_color=C["text_3"],
-            font=F["tiny"], anchor="w",
-        ).pack(anchor="w", padx=12, pady=(10, 2))
-
-        self._val_label = ctk.CTkLabel(
-            self,
-            text=value,
-            text_color=value_color or C["text_1"],
-            font=F["mono_med"],
-            anchor="w",
-        )
-        self._val_label.pack(anchor="w", padx=12, pady=(0, 10))
-
-    def update_value(self, value: str, color: str | None = None):
-        self._val_label.configure(text=value)
-        if color:
-            self._val_label.configure(text_color=color)
-
-
-class Divider(ctk.CTkFrame):
-    def __init__(self, master, **kwargs):
-        super().__init__(master, fg_color=C["border"], height=1, **kwargs)
-        self.pack(fill="x", padx=16, pady=4)

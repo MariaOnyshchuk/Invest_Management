@@ -23,7 +23,6 @@ from ui.positions_panel import PositionsPanel
 from ui.valuation_panel import ValuationPanel
 from ui.risk_panel import RiskPanel
 from ui.news_panel import NewsFeedPanel
-from ui.sidebar_panel import SidebarPanel
 from ui.bottom_bar import BottomBar
 from data.stub_data import PORTFOLIO, Stock
 
@@ -106,17 +105,8 @@ class PortfolioDashboard(ctk.CTk):
         self._valuation = ValuationPanel(left, portfolio=self._portfolio, prices=self._prices)
         self._valuation.pack(fill="x", pady=(0, 10))
 
-        # Права колонка
-        # self._sidebar = SidebarPanel(right)
-        # self._sidebar.pack(fill="x", pady=(0, 10))
-
-        # self._risk = RiskPanel(right, self._prices)
-        # self._risk.pack(fill="x", pady=(0, 10))
         watchlist_risk_row = ctk.CTkFrame(right, fg_color="transparent")
         watchlist_risk_row.pack(fill="x", pady=(0, 10))
-
-        self._sidebar = SidebarPanel(watchlist_risk_row, self._prices, self._portfolio)
-        self._sidebar.pack(side="left", fill="both", expand=True, padx=(0, 8))
 
         self._risk = RiskPanel(watchlist_risk_row, self._prices, self._portfolio)
         self._risk.pack(side="left", fill="both", expand=True)
@@ -142,7 +132,7 @@ class PortfolioDashboard(ctk.CTk):
         self._chart.update_portfolio(self._portfolio)
         self._metrics.refresh(self._prices, self._portfolio)
         self._risk.rebuild(self._prices, self._portfolio)
-        self._sidebar.update_sector_concentration(self._prices, self._portfolio)
+        
 
     def _on_stock_removed(self, ticker: str):
         self._portfolio = [s for s in self._portfolio if s.ticker != ticker]
@@ -153,7 +143,7 @@ class PortfolioDashboard(ctk.CTk):
         self._chart.update_portfolio(self._portfolio)
         self._metrics.refresh(self._prices, self._portfolio)
         self._risk.rebuild(self._prices, self._portfolio)
-        self._sidebar.update_sector_concentration(self._prices, self._portfolio)
+        
 
     # ── Live fetch ────────────────────────────────────────────────────────────
 
@@ -204,8 +194,8 @@ class PortfolioDashboard(ctk.CTk):
             self._header.set_status(True, f"Partial fallback ({fallback_count})")
         else:
             self._header.set_status(True)
-        self._sidebar.update_watchlist(watchlist)
-        self._sidebar.update_sector_concentration(self._prices, self._portfolio)
+        
+        
 
     # ── Manual refresh ────────────────────────────────────────────────────────
 
